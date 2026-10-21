@@ -1,0 +1,682 @@
+-- POKE PRODUCTIONS CAM EFFECTS V5
+-- LocalScript for an experience you own/control. Place in StarterPlayerScripts.
+-- Camera VFX suite: adjustable shake, smooth zoom/FOV, post-processing presets,
+-- letterbox bars, saved camera positions, scrollable controls, and cutscene record/playback.
+-- Cutscenes record locally in-session; they are not exported or saved between sessions.
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local GUI_NAME = "PokeProductionsCamEffectsV5"
+local oldGui = playerGui:FindFirstChild(GUI_NAME)
+if oldGui then oldGui:Destroy() end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = GUI_NAME
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 101
+gui.Parent = playerGui
+
+local panel = Instance.new("Frame")
+panel.Name = "EffectsPanel"
+panel.Size = UDim2.fromOffset(320, 500)
+panel.Position = UDim2.new(0, 14, 0.5, -250)
+panel.BackgroundColor3 = Color3.fromRGB(16, 16, 19)
+panel.BackgroundTransparency = 0.04
+panel.BorderSizePixel = 0
+panel.Active = true
+panel.Parent = gui
+Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 12)
+local outline = Instance.new("UIStroke", panel)
+outline.Color = Color3.fromRGB(220, 220, 230)
+outline.Transparency = 0.65
+
+local function label(name, text, pos, size, parent)
+    local x = Instance.new("TextLabel")
+    x.Name, x.Text, x.Position, x.Size = name, text, pos, size
+    x.BackgroundTransparency = 1
+    x.TextColor3 = Color3.fromRGB(242, 242, 246)
+    x.Font = Enum.Font.Gotham
+    x.TextSize = 11
+    x.TextXAlignment = Enum.TextXAlignment.Left
+    x.Parent = parent
+    return x
+end
+
+local function button(name, text, pos, size, parent)
+    local x = Instance.new("TextButton")
+    x.Name, x.Text, x.Position, x.Size = name, text, pos, size
+    x.BackgroundColor3 = Color3.fromRGB(39, 39, 46)
+    x.BorderSizePixel = 0
+    x.TextColor3 = Color3.fromRGB(245, 245, 248)
+    x.Font = Enum.Font.GothamMedium
+    x.TextSize = 10
+    x.AutoButtonColor = true
+    x.Parent = parent
+    Instance.new("UICorner", x).CornerRadius = UDim.new(0, 6)
+    return x
+end
+
+local title = label("Title", "POKE PRODUCTIONS", UDim2.fromOffset(13, 7), UDim2.new(1, -26, 0, 22), panel)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 15
+local sub = label("Subtitle", "CAM EFFECTS V5  /  VFX CONSOLE", UDim2.fromOffset(13, 28), UDim2.new(1, -26, 0, 16), panel)
+sub.TextColor3 = Color3.fromRGB(160, 160, 172)
+sub.TextSize = 9
+
+local scroll = Instance.new("ScrollingFrame")
+scroll.Name = "ScrollableControls"
+scroll.Position = UDim2.fromOffset(0, 48)
+scroll.Size = UDim2.new(1, 0, 1, -58)
+scroll.BackgroundTransparency = 1
+scroll.BorderSizePixel = 0
+scroll.ScrollBarThickness = 5
+scroll.ScrollBarImageColor3 = Color3.fromRGB(165, 165, 180)
+scroll.ScrollingDirection = Enum.ScrollingDirection.Y
+scroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+scroll.CanvasSize = UDim2.new(0, 0, 0, 900)
+scroll.Parent = panel
+local content = Instance.new("Frame")
+content.Name = "ControlContent"
+content.BackgroundTransparency = 1
+content.BorderSizePixel = 0
+content.Size = UDim2.new(1, -8, 0, 900)
+content.Parent = scroll
+
+local fov = 70
+local baseFov = 70
+local shakeEnabled = false
+local shakeAmount = 0.35
+local shakeSpeed = 14
+local shakeOffset = CFrame.new()
+local shakeClock = 0
+local hidden = false
+local transitionSeconds = 2
+local slots = {}
+local saved = {}
+local tweens = {}
+local renderName = "PokeProductionsCamEffectsV5Render"
+local post = {}
+local originalLighting = {
+    Brightness = Lighting.Brightness,
+    ClockTime = Lighting.ClockTime,
+    Ambient = Lighting.Ambient,
+    OutdoorAmbient = Lighting.OutdoorAmbient
+}
+
+local function camera()
+    return workspace.CurrentCamera
+end
+
+local function statusText(text)
+    status.Text = text
+end
+
+local function makeSlider(name, caption, y, minVal, maxVal, initial, callback)
+    local titleLabel = label(name .. "Label", caption, UDim2.fromOffset(14, y), UDim2.new(1, -28, 0, 18), panel)
+    local valueLabel = label(name .. "Value", tostring(initial), UDim2.new(1, -70, 0, y), UDim2.fromOffset(56, 18), panel)
+    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+    valueLabel.TextColor3 = Color3.fromRGB(195, 195, 205)
+    local track = Instance.new("Frame")
+    track.Name = name .. "Track"
+    track.Position = UDim2.fromOffset(14, y + 20)
+    track.Size = UDim2.new(1, -28, 0, 8)
+    track.BackgroundColor3 = Color3.fromRGB(54, 54, 62)
+    track.BorderSizePixel = 0
+    track.Active = true
+    track.Parent = panel
+    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+    local fill = Instance.new("Frame")
+    fill.Name = "Fill"
+    fill.Size = UDim2.new((initial - minVal) / (maxVal - minVal), 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(230, 230, 238)
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+    local knob = Instance.new("Frame")
+    knob.Size = UDim2.fromOffset(14, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new((initial - minVal) / (maxVal - minVal), 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    knob.BorderSizePixel = 0
+    knob.Parent = track
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+    local dragging = false
+    local value = initial
+    local function setFromX(x)
+        local alpha = math.clamp((x - track.AbsolutePosition.X) / math.max(track.AbsoluteSize.X, 1), 0, 1)
+        value = minVal + alpha * (maxVal - minVal)
+        local rounded = math.floor(value * 100 + 0.5) / 100
+        fill.Size = UDim2.new(alpha, 0, 1, 0)
+        knob.Position = UDim2.new(alpha, 0, 0.5, 0)
+        valueLabel.Text = tostring(rounded)
+        callback(value)
+    end
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            setFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+            setFromX(input.Position.X)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    return titleLabel
+end
+
+local function ensureEffect(className, name)
+    if post[name] then return post[name] end
+    local existing = Lighting:FindFirstChild(name)
+    if existing and existing.ClassName == className then
+        post[name] = existing
+    else
+        local obj = Instance.new(className)
+        obj.Name = name
+        obj.Enabled = false
+        obj.Parent = Lighting
+        post[name] = obj
+    end
+    return post[name]
+end
+
+local bloom = ensureEffect("BloomEffect", "PPCamEffects_Bloom")
+bloom.Intensity, bloom.Size, bloom.Threshold = 0.35, 24, 1.2
+local blur = ensureEffect("BlurEffect", "PPCamEffects_Blur")
+blur.Size = 8
+local color = ensureEffect("ColorCorrectionEffect", "PPCamEffects_Color")
+color.Brightness, color.Contrast, color.Saturation, color.TintColor = 0, 0.12, -0.08, Color3.new(1, 1, 1)
+local rays = ensureEffect("SunRaysEffect", "PPCamEffects_SunRays")
+rays.Intensity, rays.Spread = 0.08, 0.8
+local dof = ensureEffect("DepthOfFieldEffect", "PPCamEffects_DepthOfField")
+dof.FarIntensity, dof.FocusDistance, dof.InFocusRadius, dof.NearIntensity = 0.18, 20, 12, 0.12
+
+-- Letterbox overlay
+local topBar = Instance.new("Frame")
+topBar.Name = "LetterboxTop"
+topBar.Size = UDim2.new(1, 0, 0, 0)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.new(0, 0, 0)
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 20
+topBar.Parent = gui
+local bottomBar = Instance.new("Frame")
+bottomBar.Name = "LetterboxBottom"
+bottomBar.Size = UDim2.new(1, 0, 0, 0)
+bottomBar.Position = UDim2.new(0, 0, 1, 0)
+bottomBar.AnchorPoint = Vector2.new(0, 1)
+bottomBar.BackgroundColor3 = Color3.new(0, 0, 0)
+bottomBar.BorderSizePixel = 0
+bottomBar.ZIndex = 20
+bottomBar.Parent = gui
+local letterboxOn = false
+
+local shakeButton = button("ShakeToggle", "SHAKE: OFF", UDim2.fromOffset(13, 52), UDim2.new(1, -26, 0, 27), panel)
+local fovLabel = label("FOVLabel", "FOV: 70°", UDim2.fromOffset(13, 84), UDim2.new(1, -26, 0, 18), panel)
+fovLabel.TextColor3 = Color3.fromRGB(200, 200, 210)
+local zoomIn = button("ZoomIn", "ZOOM IN", UDim2.fromOffset(13, 105), UDim2.new(0.5, -19, 0, 27), panel)
+local zoomOut = button("ZoomOut", "ZOOM OUT", UDim2.new(0.5, 6, 0, 105), UDim2.new(0.5, -19, 0, 27), panel)
+local cine = button("CinematicFOV", "CINEMATIC ZOOM", UDim2.fromOffset(13, 137), UDim2.new(1, -26, 0, 27), panel)
+
+makeSlider("ShakeAmount", "SHAKE STRENGTH", 171, 0, 1, shakeAmount, function(v) shakeAmount = v end)
+makeSlider("ShakeSpeed", "SHAKE SPEED", 198, 2, 30, shakeSpeed, function(v) shakeSpeed = v end)
+
+local vfxHeading = label("VFXHeading", "POST-PROCESSING VFX", UDim2.fromOffset(13, 235), UDim2.new(1, -26, 0, 18), panel)
+vfxHeading.Font = Enum.Font.GothamBold
+local bloomButton = button("BloomToggle", "BLOOM: OFF", UDim2.fromOffset(13, 257), UDim2.new(0.5, -18, 0, 27), panel)
+local blurButton = button("BlurToggle", "BLUR: OFF", UDim2.new(0.5, 5, 0, 257), UDim2.new(0.5, -18, 0, 27), panel)
+local raysButton = button("RaysToggle", "SUN RAYS: OFF", UDim2.fromOffset(13, 289), UDim2.new(0.5, -18, 0, 27), panel)
+local dofButton = button("DOFToggle", "DEPTH: OFF", UDim2.new(0.5, 5, 0, 289), UDim2.new(0.5, -18, 0, 27), panel)
+local gradeButton = button("GradeToggle", "FILM GRADE: OFF", UDim2.fromOffset(13, 321), UDim2.new(0.5, -18, 0, 27), panel)
+local monoButton = button("MonoToggle", "MONOCHROME: OFF", UDim2.new(0.5, 5, 0, 321), UDim2.new(0.5, -18, 0, 27), panel)
+local warmButton = button("WarmToggle", "WARM LOOK: OFF", UDim2.fromOffset(13, 353), UDim2.new(0.5, -18, 0, 27), panel)
+local boxButton = button("LetterboxToggle", "LETTERBOX: OFF", UDim2.new(0.5, 5, 0, 353), UDim2.new(0.5, -18, 0, 27), panel)
+
+local presetHeading = label("PresetHeading", "CAMERA POSITION PRESETS", UDim2.fromOffset(13, 387), UDim2.new(1, -26, 0, 17), panel)
+presetHeading.Font = Enum.Font.GothamBold
+presetHeading.TextSize = 10
+local slotsHint = label("SlotsHint", "Save current angle, then glide back to it.", UDim2.fromOffset(13, 403), UDim2.new(1, -26, 0, 15), panel)
+slotsHint.TextColor3 = Color3.fromRGB(155, 155, 168)
+slotsHint.TextSize = 9
+
+local status = label("Status", "Ready • Presets last for this session", UDim2.fromOffset(13, 550), UDim2.new(1, -26, 0, 18), panel)
+status.TextColor3 = Color3.fromRGB(165, 165, 175)
+status.TextSize = 9
+
+local function updateFovLabel()
+    fovLabel.Text = "FOV: " .. tostring(math.floor(fov + 0.5)) .. "°"
+end
+
+local function tweenFov(target, duration)
+    target = math.clamp(target, 30, 100)
+    fov = target
+    updateFovLabel()
+    local cam = camera()
+    if not cam then return end
+    if tweens.fov then tweens.fov:Cancel() end
+    tweens.fov = TweenService:Create(cam, TweenInfo.new(duration or 0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {FieldOfView = target})
+    tweens.fov:Play()
+end
+
+local function moveToSaved(cf)
+    local cam = camera()
+    if not cam then return end
+    cam.CameraType = Enum.CameraType.Scriptable
+    if tweens.move then tweens.move:Cancel() end
+    tweens.move = TweenService:Create(cam, TweenInfo.new(transitionSeconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {CFrame = cf})
+    tweens.move:Play()
+    statusText("Smooth camera transition...")
+    tweens.move.Completed:Once(function(state)
+        if state == Enum.PlaybackState.Completed then statusText("Camera reached preset") end
+    end)
+end
+
+shakeButton.Activated:Connect(function()
+    shakeEnabled = not shakeEnabled
+    shakeButton.Text = shakeEnabled and "SHAKE: ON" or "SHAKE: OFF"
+    statusText(shakeEnabled and "Shake enabled • adjust slider" or "Shake disabled")
+end)
+zoomIn.Activated:Connect(function() tweenFov(fov - 5, 0.2) end)
+zoomOut.Activated:Connect(function() tweenFov(fov + 5, 0.2) end)
+cine.Activated:Connect(function()
+    local target = fov <= 45 and baseFov or 38
+    tweenFov(target, 1.4)
+    statusText("Cinematic FOV transition")
+end)
+
+local function toggleEffect(effect, btn, labelText)
+    effect.Enabled = not effect.Enabled
+    btn.Text = labelText .. (effect.Enabled and ": ON" or ": OFF")
+    statusText(labelText .. (effect.Enabled and " enabled" or " disabled"))
+end
+bloomButton.Activated:Connect(function() toggleEffect(bloom, bloomButton, "BLOOM") end)
+blurButton.Activated:Connect(function() toggleEffect(blur, blurButton, "BLUR") end)
+raysButton.Activated:Connect(function() toggleEffect(rays, raysButton, "SUN RAYS") end)
+dofButton.Activated:Connect(function() toggleEffect(dof, dofButton, "DEPTH") end)
+gradeButton.Activated:Connect(function()
+    color.Enabled = not color.Enabled
+    color.Saturation = -0.08
+    color.Contrast = 0.12
+    color.Brightness = 0
+    color.TintColor = Color3.new(1, 1, 1)
+    gradeButton.Text = color.Enabled and "FILM GRADE: ON" or "FILM GRADE: OFF"
+    statusText("Film color grade " .. (color.Enabled and "enabled" or "disabled"))
+end)
+local monochrome = false
+monoButton.Activated:Connect(function()
+    monochrome = not monochrome
+    color.Enabled = monochrome or gradeButton.Text == "FILM GRADE: ON" or warmButton.Text == "WARM LOOK: ON"
+    color.Saturation = monochrome and -1 or -0.08
+    monoButton.Text = monochrome and "MONOCHROME: ON" or "MONOCHROME: OFF"
+    statusText(monochrome and "Monochrome look enabled" or "Monochrome look disabled")
+end)
+local warm = false
+warmButton.Activated:Connect(function()
+    warm = not warm
+    color.Enabled = warm or monochrome or gradeButton.Text == "FILM GRADE: ON"
+    color.TintColor = warm and Color3.fromRGB(255, 224, 190) or Color3.new(1, 1, 1)
+    warmButton.Text = warm and "WARM LOOK: ON" or "WARM LOOK: OFF"
+    statusText(warm and "Warm film look enabled" or "Warm look disabled")
+end)
+boxButton.Activated:Connect(function()
+    letterboxOn = not letterboxOn
+    local height = letterboxOn and 52 or 0
+    TweenService:Create(topBar, TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, height)}):Play()
+    TweenService:Create(bottomBar, TweenInfo.new(0.25), {Size = UDim2.new(1, 0, 0, height)}):Play()
+    boxButton.Text = letterboxOn and "LETTERBOX: ON" or "LETTERBOX: OFF"
+end)
+
+for i = 1, 4 do
+    local y = 424 + (i - 1) * 29
+    local saveBtn = button("SavePosition" .. i, "SAVE " .. i, UDim2.fromOffset(13, y), UDim2.fromOffset(78, 24), panel)
+    local goBtn = button("GoPosition" .. i, "GO " .. i, UDim2.fromOffset(99, y), UDim2.fromOffset(78, 24), panel)
+    local clearBtn = button("ClearPosition" .. i, "CLEAR", UDim2.fromOffset(185, y), UDim2.fromOffset(101, 24), panel)
+    slots[i] = {save = saveBtn, go = goBtn, clear = clearBtn}
+    saveBtn.Activated:Connect(function()
+        local cam = camera()
+        if not cam then return end
+        saved[i] = cam.CFrame
+        saveBtn.Text = "SAVED " .. i
+        statusText("Position " .. i .. " saved")
+    end)
+    goBtn.Activated:Connect(function()
+        if saved[i] then moveToSaved(saved[i]) else statusText("Save position " .. i .. " first") end
+    end)
+    clearBtn.Activated:Connect(function()
+        saved[i] = nil
+        saveBtn.Text = "SAVE " .. i
+        statusText("Position " .. i .. " cleared")
+    end)
+end
+
+-- Cutscene tools: record live camera movement, or play through saved camera positions.
+local cutsceneHeading = label("CutsceneHeading", "CUTSCENE DIRECTOR", UDim2.fromOffset(13, 575), UDim2.new(1, -26, 0, 18), panel)
+cutsceneHeading.Font = Enum.Font.GothamBold
+local cutsceneHint = label("CutsceneHint", "Record your camera OR build a path from saved slots.", UDim2.fromOffset(13, 593), UDim2.new(1, -26, 0, 15), panel)
+cutsceneHint.TextSize = 9
+cutsceneHint.TextColor3 = Color3.fromRGB(155, 155, 168)
+local recordBtn = button("RecordCutscene", "● RECORD MOVE", UDim2.fromOffset(13, 612), UDim2.new(0.5, -18, 0, 27), panel)
+local stopRecordBtn = button("StopRecording", "STOP RECORD", UDim2.new(0.5, 5, 0, 612), UDim2.new(0.5, -18, 0, 27), panel)
+local playCutsceneBtn = button("PlayCutscene", "▶ PLAY CUTSCENE", UDim2.fromOffset(13, 644), UDim2.new(0.5, -18, 0, 27), panel)
+local pauseCutsceneBtn = button("PauseCutscene", "Ⅱ PAUSE", UDim2.new(0.5, 5, 0, 644), UDim2.new(0.5, -18, 0, 27), panel)
+local stopCutsceneBtn = button("StopCutscene", "■ STOP / RESET", UDim2.fromOffset(13, 676), UDim2.new(1, -26, 0, 27), panel)
+local recordRateLabel = label("RecordRateLabel", "RECORD SAMPLE RATE", UDim2.fromOffset(13, 707), UDim2.new(1, -26, 0, 16), panel)
+recordRateLabel.TextColor3 = Color3.fromRGB(195, 195, 205)
+local recordInterval = 0.12
+makeSlider("RecordRate", "SAMPLE INTERVAL (SEC)", 724, 0.05, 0.5, recordInterval, function(v) recordInterval = v end)
+local fadeFrame = Instance.new("Frame")
+fadeFrame.Name = "CutsceneFade"
+fadeFrame.Size = UDim2.fromScale(1, 1)
+fadeFrame.BackgroundColor3 = Color3.new(0, 0, 0)
+fadeFrame.BackgroundTransparency = 1
+fadeFrame.BorderSizePixel = 0
+fadeFrame.ZIndex = 50
+fadeFrame.Parent = gui
+
+local recording = false
+local recordingStarted = 0
+local lastSample = 0
+local recordedFrames = {}
+local cutscenePlaying = false
+local cutscenePaused = false
+local cutsceneToken = 0
+local cutsceneReturnType = nil
+local cutsceneReturnSubject = nil
+local recordConnection = nil
+
+local function fadeTo(transparency, duration)
+    local tw = TweenService:Create(fadeFrame, TweenInfo.new(duration or 0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+        BackgroundTransparency = transparency
+    })
+    tw:Play()
+    return tw
+end
+
+local function captureFrame(now)
+    local cam = camera()
+    if not cam then return end
+    table.insert(recordedFrames, {t = now - recordingStarted, cf = cam.CFrame, fov = cam.FieldOfView})
+end
+
+local function startRecording()
+    if recording then return end
+    recordedFrames = {}
+    recording = true
+    recordingStarted = os.clock()
+    lastSample = 0
+    recordBtn.Text = "● RECORDING..."
+    statusText("Recording camera movement")
+end
+
+local function stopRecording()
+    if not recording then return end
+    recording = false
+    recordBtn.Text = "● RECORD MOVE"
+    statusText("Recorded " .. #recordedFrames .. " camera samples")
+end
+
+local function playFrames(frames)
+    if #frames < 2 then statusText("Record a move or save at least two camera positions first"); return end
+    cutsceneToken += 1
+    local myToken = cutsceneToken
+    cutscenePlaying, cutscenePaused = true, false
+    local cam = camera()
+    if not cam then return end
+    cutsceneReturnType, cutsceneReturnSubject = cam.CameraType, cam.CameraSubject
+    cam.CameraType = Enum.CameraType.Scriptable
+    fadeTo(0, 0.01)
+    fadeTo(1, 0.6)
+    statusText("Cutscene playing • " .. #frames .. " keyframes")
+    task.spawn(function()
+        local index = 1
+        while index < #frames and cutsceneToken == myToken do
+            if cutscenePaused then
+                RunService.Heartbeat:Wait()
+            else
+                local a, b = frames[index], frames[index + 1]
+                local duration = math.max(0.05, b.t - a.t)
+                cam.CFrame = a.cf
+                cam.FieldOfView = a.fov or cam.FieldOfView
+                local tw = TweenService:Create(cam, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+                    CFrame = b.cf,
+                    FieldOfView = b.fov or cam.FieldOfView
+                })
+                tw:Play()
+                local completed = false
+                local connection
+                connection = tw.Completed:Connect(function() completed = true end)
+                while not completed and cutsceneToken == myToken do
+                    if cutscenePaused then
+                        tw:Pause()
+                        repeat RunService.Heartbeat:Wait() until not cutscenePaused or cutsceneToken ~= myToken
+                        if cutsceneToken == myToken then tw:Play() end
+                    end
+                    RunService.Heartbeat:Wait()
+                end
+                connection:Disconnect()
+                if cutsceneToken ~= myToken then tw:Cancel(); return end
+                index += 1
+            end
+        end
+        if cutsceneToken == myToken then
+            cutscenePlaying, cutscenePaused = false, false
+            fadeTo(0, 0.25)
+            task.wait(0.25)
+            fadeTo(1, 0.5)
+            if cam and cam.Parent then
+                cam.CameraType = cutsceneReturnType or Enum.CameraType.Custom
+                if cutsceneReturnSubject then cam.CameraSubject = cutsceneReturnSubject end
+            end
+            statusText("Cutscene finished")
+        end
+    end)
+end
+
+local function makeSavedPath()
+    local frames = {}
+    local timeCursor = 0
+    for i = 1, 4 do
+        if saved[i] then
+            table.insert(frames, {t = timeCursor, cf = saved[i], fov = fov})
+            timeCursor += transitionSeconds
+        end
+    end
+    if #frames >= 2 then
+        for i, frame in ipairs(frames) do frame.t = (i - 1) * transitionSeconds end
+    end
+    return frames
+end
+
+recordBtn.Activated:Connect(startRecording)
+stopRecordBtn.Activated:Connect(stopRecording)
+playCutsceneBtn.Activated:Connect(function()
+    if recording then stopRecording() end
+    if #recordedFrames >= 2 then
+        playFrames(recordedFrames)
+    else
+        playFrames(makeSavedPath())
+    end
+end)
+pauseCutsceneBtn.Activated:Connect(function()
+    if not cutscenePlaying then statusText("No cutscene is playing"); return end
+    cutscenePaused = not cutscenePaused
+    pauseCutsceneBtn.Text = cutscenePaused and "▶ RESUME" or "Ⅱ PAUSE"
+    statusText(cutscenePaused and "Cutscene paused" or "Cutscene resumed")
+end)
+stopCutsceneBtn.Activated:Connect(function()
+    cutsceneToken += 1
+    cutscenePlaying, cutscenePaused = false, false
+    stopRecording()
+    local cam = camera()
+    if cam then
+        cam.CameraType = cutsceneReturnType or Enum.CameraType.Custom
+        if cutsceneReturnSubject then cam.CameraSubject = cutsceneReturnSubject end
+    end
+    fadeTo(1, 0.25)
+    pauseCutsceneBtn.Text = "Ⅱ PAUSE"
+    statusText("Cutscene stopped")
+end)
+
+local resetBtn = button("ResetAll", "RESET EFFECTS", UDim2.fromOffset(13, 537), UDim2.fromOffset(130, 25), panel)
+resetBtn.Activated:Connect(function()
+    shakeEnabled = false
+    shakeButton.Text = "SHAKE: OFF"
+    shakeAmount = 0.35
+    tweenFov(70, 0.4)
+    for _, effect in pairs({bloom, blur, color, rays, dof}) do effect.Enabled = false end
+    letterboxOn = false
+    topBar.Size, bottomBar.Size = UDim2.new(1, 0, 0, 0), UDim2.new(1, 0, 0, 0)
+    bloomButton.Text, blurButton.Text = "BLOOM: OFF", "BLUR: OFF"
+    raysButton.Text, dofButton.Text = "SUN RAYS: OFF", "DEPTH: OFF"
+    gradeButton.Text, monoButton.Text, warmButton.Text = "FILM GRADE: OFF", "MONOCHROME: OFF", "WARM LOOK: OFF"
+    boxButton.Text = "LETTERBOX: OFF"
+    monochrome, warm = false, false
+    color.Saturation, color.Contrast, color.Brightness, color.TintColor = -0.08, 0.12, 0, Color3.new(1,1,1)
+    shakeSpeed = 14
+    cutsceneToken += 1
+    cutscenePlaying, cutscenePaused = false, false
+    fadeTo(1, 0.2)
+    statusText("Effects reset")
+end)
+local hideBtn = button("HidePanel", "HIDE PANEL", UDim2.new(1, -127, 0, 537), UDim2.fromOffset(114, 25), panel)
+hideBtn.Activated:Connect(function() hidden = true; panel.Visible = false end)
+
+local function runCommand(raw)
+    if typeof(raw) ~= "string" then return end
+    local msg = string.lower(raw):match("^%s*(.-)%s*$")
+    local n = tonumber(msg:match("^/fov%s+(%d+%.?%d*)$"))
+    local t = tonumber(msg:match("^/camtime%s+(%d+%.?%d*)$"))
+    local saveN = tonumber(msg:match("^/savepos%s+(%d+)$"))
+    local goN = tonumber(msg:match("^/gotopos%s+(%d+)$"))
+    if msg == "/hideeffects" then hidden = true; panel.Visible = false
+    elseif msg == "/showeffects" then hidden = false; panel.Visible = true
+    elseif msg == "/shake" then shakeButton:Activate()
+    elseif msg == "/cinezoom" then cine:Activate()
+    elseif msg == "/bloom" then bloomButton:Activate()
+    elseif msg == "/blur" then blurButton:Activate()
+    elseif msg == "/sunrays" then raysButton:Activate()
+    elseif msg == "/depth" then dofButton:Activate()
+    elseif msg == "/letterbox" then boxButton:Activate()
+    elseif msg == "/monochrome" then monoButton:Activate()
+    elseif msg == "/warm" then warmButton:Activate()
+    elseif msg == "/resetcamfx" then resetBtn:Activate()
+    elseif msg == "/recordcutscene" then startRecording()
+    elseif msg == "/stoprecord" then stopRecording()
+    elseif msg == "/playcutscene" then
+        if recording then stopRecording() end
+        if #recordedFrames >= 2 then playFrames(recordedFrames) else playFrames(makeSavedPath()) end
+    elseif msg == "/pausecutscene" then
+        if cutscenePlaying then
+            cutscenePaused = not cutscenePaused
+            pauseCutsceneBtn.Text = cutscenePaused and "▶ RESUME" or "Ⅱ PAUSE"
+        end
+    elseif msg == "/stopcutscene" then
+        cutsceneToken += 1
+        cutscenePlaying, cutscenePaused = false, false
+        stopRecording()
+        local cam = camera()
+        if cam then
+            cam.CameraType = cutsceneReturnType or Enum.CameraType.Custom
+            if cutsceneReturnSubject then cam.CameraSubject = cutsceneReturnSubject end
+        end
+        fadeTo(1, 0.25)
+    elseif n then tweenFov(n, 0.3)
+    elseif t then transitionSeconds = math.clamp(t, 0.25, 15); statusText("Transition duration: " .. transitionSeconds .. "s")
+    elseif saveN and saveN >= 1 and saveN <= 4 then
+        local cam = camera()
+        if cam then saved[saveN] = cam.CFrame; slots[saveN].save.Text = "SAVED " .. saveN; statusText("Position " .. saveN .. " saved") end
+    elseif goN and goN >= 1 and goN <= 4 then
+        if saved[goN] then moveToSaved(saved[goN]) else statusText("Save position " .. goN .. " first") end
+    end
+end
+
+local function registerCommand(name, alias)
+    local cmd = Instance.new("TextChatCommand")
+    cmd.Name = name
+    cmd.PrimaryAlias = alias
+    cmd.Parent = TextChatService
+    cmd.Triggered:Connect(function(_, text)
+        runCommand(text)
+    end)
+end
+for _, item in ipairs({
+    {"HideEffectsCommand", "/hideeffects"}, {"ShowEffectsCommand", "/showeffects"},
+    {"ShakeEffectsCommand", "/shake"}, {"CineZoomCommand", "/cinezoom"},
+    {"FovEffectsCommand", "/fov"}, {"SavePositionCommand", "/savepos"},
+    {"GoPositionCommand", "/gotopos"}, {"CameraTimeCommand", "/camtime"},
+    {"BloomCommand", "/bloom"}, {"BlurCommand", "/blur"},
+    {"SunRaysCommand", "/sunrays"}, {"DepthCommand", "/depth"},
+    {"LetterboxCommand", "/letterbox"}, {"MonochromeCommand", "/monochrome"},
+    {"WarmCommand", "/warm"}, {"ResetCameraEffectsCommand", "/resetcamfx"},
+    {"RecordCutsceneCommand", "/recordcutscene"}, {"StopRecordCommand", "/stoprecord"},
+    {"PlayCutsceneCommand", "/playcutscene"}, {"PauseCutsceneCommand", "/pausecutscene"},
+    {"StopCutsceneCommand", "/stopcutscene"},
+}) do
+    pcall(function() registerCommand(item[1], item[2]) end)
+end
+pcall(function()
+    TextChatService.MessageReceived:Connect(function(message)
+        if message.TextSource and message.TextSource.UserId == player.UserId then runCommand(message.Text) end
+    end)
+end)
+pcall(function() player.Chatted:Connect(runCommand) end)
+
+RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function(dt)
+    local cam = camera()
+    if not cam then return end
+    if recording and os.clock() - lastSample >= recordInterval then
+        lastSample = os.clock()
+        captureFrame(os.clock())
+    end
+    if shakeEnabled and shakeAmount > 0 then
+        shakeClock += dt * shakeSpeed
+        local strength = shakeAmount * 0.22
+        local x = math.noise(shakeClock, 0, 0) * strength
+        local y = math.noise(0, shakeClock, 0) * strength
+        local roll = math.noise(0, 0, shakeClock) * strength * 0.045
+        local pitch = math.noise(shakeClock, 4, 0) * strength * 0.035
+        local yaw = math.noise(0, shakeClock, 4) * strength * 0.035
+        cam.CFrame = cam.CFrame * CFrame.new(x, y, 0) * CFrame.Angles(pitch, yaw, roll)
+    end
+end)
+
+script.Destroying:Connect(function()
+    recording = false
+    cutsceneToken += 1
+    pcall(function() RunService:UnbindFromRenderStep(renderName) end)
+    if gui then gui:Destroy() end
+    -- Disable effects created by this script so they don't linger.
+    for _, effect in pairs(post) do
+        if effect and effect.Parent then effect.Enabled = false end
+    end
+end)
+
+-- Move all controls below the fixed header into the scrollable content frame.
+for _, child in ipairs(panel:GetChildren()) do
+    if child ~= title and child ~= sub and child ~= outline and child ~= scroll then
+        if child:IsA("GuiObject") then
+            child.Parent = content
+            child.Position = UDim2.new(
+                child.Position.X.Scale, child.Position.X.Offset,
+                child.Position.Y.Scale, child.Position.Y.Offset - 48
+            )
+        end
+    end
+end
+content.Size = UDim2.new(1, -8, 0, 950)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 950)
+
+updateFovLabel()
