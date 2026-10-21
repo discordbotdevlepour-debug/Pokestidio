@@ -58,6 +58,50 @@ sub.TextColor3 = Color3.fromRGB(160, 160, 170)
 sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.Parent = panel
 
+-- Drag handle: grab the title area to move the whole studio panel while free camera is active.
+panel.Active = true
+local dragHandle = Instance.new("TextButton")
+dragHandle.Name = "DragHandle"
+dragHandle.Size = UDim2.new(1, 0, 0, 62)
+dragHandle.Position = UDim2.fromOffset(0, 0)
+dragHandle.BackgroundTransparency = 1
+dragHandle.BorderSizePixel = 0
+dragHandle.Text = ""
+dragHandle.AutoButtonColor = false
+dragHandle.Active = true
+dragHandle.ZIndex = 10
+dragHandle.Parent = panel
+
+local draggingPanel = false
+local dragInput = nil
+local dragStart = nil
+local panelStart = nil
+
+dragHandle.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        draggingPanel = true
+        dragStart = input.Position
+        panelStart = panel.Position
+        dragInput = input
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                draggingPanel = false
+                dragInput = nil
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if draggingPanel and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        panel.Position = UDim2.new(
+            panelStart.X.Scale, panelStart.X.Offset + delta.X,
+            panelStart.Y.Scale, panelStart.Y.Offset + delta.Y
+        )
+    end
+end)
+
 local scroll = Instance.new("ScrollingFrame")
 scroll.Name = "Controls"
 scroll.Position = UDim2.fromOffset(8, 66)
